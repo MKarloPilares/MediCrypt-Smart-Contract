@@ -3,9 +3,11 @@ pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract MediCrypt is Ownable, ERC721Enumerable {
+contract MediCrypt is Ownable, ERC721Enumerable, ReentrancyGuard {
     uint256 public nextTokenId;
+    uint256 public constant MAX_BATCH_SIZE = 100;
 
     struct NFTMetadata {
         string nftURI;
@@ -13,29 +15,30 @@ contract MediCrypt is Ownable, ERC721Enumerable {
         string encryptionKey;
     }
 
-    // Mapping from token ID to metadata
     mapping(uint256 => NFTMetadata) private _tokenMetadata;
 
-    // Mapping from token ID to a set of whitelisted addresses and their names
     mapping(uint256 => mapping(address => bool)) private _whitelist;
     mapping(uint256 => mapping(address => string)) private _whitelistNames;
 
-    // Array of whitelisted addresses for each token ID
     mapping(uint256 => address[]) private _whitelistedAddresses;
 
-    // Mapping from address to list of whitelisted token IDs
     mapping(address => uint256[]) private _whitelistedTokens;
 
-    // Mapping from address to list of whitelisted token names
     mapping(address => string[]) private _whitelistedTokenNames;
 
-    // Mapping from address to medical provider names
     mapping(address => string) private _medicalProviders;
     address[] private _medicalProviderAddresses;
 
-    // Mapping for agencies with associated names
     mapping(address => string) private _agencies;
     address[] private _agencyAddresses;
+    event TokenMinted(address indexed to, uint256 indexed tokenId, string nftName);
+    event TokenMetadataUpdated(uint256 indexed tokenId, address indexed updater);
+    event AddressWhitelisted(uint256 indexed tokenId, address indexed whitelistedAddress, string name);
+    event AddressRemovedFromWhitelist(uint256 indexed tokenId, address indexed removedAddress);
+    event MedicalProviderAdded(address indexed provider, string name);
+    event MedicalProviderRemoved(address indexed provider);
+    event AgencyAdded(address indexed agency, string name);
+    event AgencyRemoved(address indexed agency);
 
     constructor() ERC721("MediCryptedRecord", "MDR") Ownable(0x3fcc9F262124D96B48e03CC3683462C08049384E) {}
 
@@ -44,13 +47,22 @@ contract MediCrypt is Ownable, ERC721Enumerable {
         string memory nftURI, 
         string memory nftName, 
         string memory encryptionKey
-    ) public payable {
+    ) public payable nonReentrant {
         require(msg.value >= 0.000038 ether, "Insufficient funds for minting");
+        require(ownerWalletAddress != address(0), "Invalid owner address");
+        require(bytes(nftURI).length > 0, "NFT URI cannot be empty");
+        require(bytes(nftName).length > 0, "NFT name cannot be empty");
+        require(bytes(encryptionKey).length > 0, "Encryption key cannot be empty");
 
-        _safeMint(ownerWalletAddress, nextTokenId);
-        _tokenMetadata[nextTokenId] = NFTMetadata(nftURI, nftName, encryptionKey);
+        uint256 currentTokenId = nextTokenId;
+        _safeMint(ownerWalletAddress, currentTokenId);
+        _tokenMetadata[currentTokenId] = NFTMetadata(nftURI, nftName, encryptionKey);
         nextTokenId++;
-        payable(owner()).transfer(msg.value);
+        
+        (bool success, ) = payable(owner()).call{value: msg.value}("");
+        require(success, "Transfer failed");
+        
+        emit TokenMinted(ownerWalletAddress, currentTokenId, nftName);
     }
 
     function getTokenMetadata(uint256 tokenId) 
@@ -59,6 +71,7 @@ contract MediCrypt is Ownable, ERC721Enumerable {
         onlyTokenOwnerOrWhitelistedOrAgency(tokenId) 
         returns (string memory nftURI, string memory nftName, string memory encryptionKey) 
     {
+        require(_exists(tokenId), "Token does not exist");
         NFTMetadata memory metadata = _tokenMetadata[tokenId];
         return (metadata.nftURI, metadata.nftName, metadata.encryptionKey);
     }
@@ -104,25 +117,44 @@ contract MediCrypt is Ownable, ERC721Enumerable {
         string memory nftURI, 
         string memory nftName, 
         string memory encryptionKey
-    ) public payable onlyWhitelisted(tokenId) {
-        require(msg.value >= 0.000038 ether, "Insufficient funds for minting");
+    ) public payable nonReentrant onlyWhitelisted(tokenId) {
+        require(msg.value >= 0.000038 ether, "Insufficient funds for editing");
+        require(_exists(tokenId), "Token does not exist");
+        require(bytes(nftURI).length > 0, "NFT URI cannot be empty");
+        require(bytes(nftName).length > 0, "NFT name cannot be empty");
+        require(bytes(encryptionKey).length > 0, "Encryption key cannot be empty");
 
         _tokenMetadata[tokenId] = NFTMetadata(nftURI, nftName, encryptionKey);
-        payable(owner()).transfer(msg.value);
+        
+        (bool success, ) = payable(owner()).call{value: msg.value}("");
+        require(success, "Transfer failed");
+        
+        emit TokenMetadataUpdated(tokenId, msg.sender);
     }
 
     function whitelistAddress(uint256 tokenId, address walletAddress, string memory name, string memory nftName) public onlyTokenOwner(tokenId) {
+        require(_exists(tokenId), "Token does not exist");
+        require(walletAddress != address(0), "Invalid wallet address");
+        require(bytes(name).length > 0, "Name cannot be empty");
+        require(bytes(nftName).length > 0, "NFT name cannot be empty");
+        require(!_whitelist[tokenId][walletAddress], "Address already whitelisted");
+
         _whitelist[tokenId][walletAddress] = true;
         _whitelistNames[tokenId][walletAddress] = name;
         _whitelistedTokens[walletAddress].push(tokenId);
         _whitelistedTokenNames[walletAddress].push(nftName);
         _whitelistedAddresses[tokenId].push(walletAddress);
+        
+        emit AddressWhitelisted(tokenId, walletAddress, name);
     }
 
     function removeWhitelistedAddress(uint256 tokenId, address walletAddress, string memory nftName) public onlyTokenOwner(tokenId) {
+        require(_exists(tokenId), "Token does not exist");
+        require(_whitelist[tokenId][walletAddress], "Address not whitelisted");
+        
         _whitelist[tokenId][walletAddress] = false;
         
-        // Remove tokenId from _whitelistedTokens[walletAddress]
+        // Remove tokenId from _whitelistedTokens[walletAddress] - more efficient removal
         uint256[] storage tokenList = _whitelistedTokens[walletAddress];
         for (uint256 i = 0; i < tokenList.length; i++) {
             if (tokenList[i] == tokenId) {
@@ -153,6 +185,7 @@ contract MediCrypt is Ownable, ERC721Enumerable {
         }
 
         delete _whitelistNames[tokenId][walletAddress];
+        emit AddressRemovedFromWhitelist(tokenId, walletAddress);
     }
 
     function getAllWhitelistedTokenNames(address walletAddress) 
@@ -177,32 +210,50 @@ contract MediCrypt is Ownable, ERC721Enumerable {
         public
         view
         onlyTokenOwner(tokenId)
-        returns (address[] memory walletAddressess, string[] memory names)
+        returns (address[] memory walletAddresses, string[] memory names)
     {
-        uint256 count = _whitelistedAddresses[tokenId].length;
-        walletAddressess = new address[](count);
+        require(_exists(tokenId), "Token does not exist");
+        uint256 count = 0;
+        
+        // Count active whitelisted addresses
+        for (uint256 i = 0; i < _whitelistedAddresses[tokenId].length; i++) {
+            if (_whitelist[tokenId][_whitelistedAddresses[tokenId][i]]) {
+                count++;
+            }
+        }
+        
+        walletAddresses = new address[](count);
         names = new string[](count);
+        uint256 index = 0;
 
-        for (uint256 i = 0; i < count; i++) {
+        for (uint256 i = 0; i < _whitelistedAddresses[tokenId].length; i++) {
             address addr = _whitelistedAddresses[tokenId][i];
             if (_whitelist[tokenId][addr]) {
-                walletAddressess[i] = addr;
-                names[i] = _whitelistNames[tokenId][addr];
+                walletAddresses[index] = addr;
+                names[index] = _whitelistNames[tokenId][addr];
+                index++;
             }
         }
 
-        return (walletAddressess, names);
+        return (walletAddresses, names);
     }
 
     function addMedicalProvider(address walletAddress, string memory name) public onlyOwner {
+        require(walletAddress != address(0), "Invalid wallet address");
+        require(bytes(name).length > 0, "Name cannot be empty");
+        
         if(bytes(_medicalProviders[walletAddress]).length == 0){
             _medicalProviderAddresses.push(walletAddress);
         }
         _medicalProviders[walletAddress] = name;
+        emit MedicalProviderAdded(walletAddress, name);
     }
 
     function removeMedicalProvider(address walletAddress) public onlyOwner {
+        require(bytes(_medicalProviders[walletAddress]).length > 0, "Provider does not exist");
+        
         delete _medicalProviders[walletAddress];
+        
         // Remove provider from _medicalProviderAddresses array
         for (uint256 i = 0; i < _medicalProviderAddresses.length; i++) {
             if (_medicalProviderAddresses[i] == walletAddress) {
@@ -211,6 +262,7 @@ contract MediCrypt is Ownable, ERC721Enumerable {
                 break;
             }
         }
+        emit MedicalProviderRemoved(walletAddress);
     }
 
     function isMedicalProvider(address walletAddress) public view returns (bool) {
@@ -242,24 +294,28 @@ contract MediCrypt is Ownable, ERC721Enumerable {
 
     // Function to add an agency address with its name to the Agencies map
     function addAgency(address walletAddress, string memory name) public onlyOwner {
-        if(bytes(_agencies[walletAddress]).length == 0) {
-            _agencies[walletAddress] = name;
-            _agencyAddresses.push(walletAddress);
-        }
+        require(walletAddress != address(0), "Invalid wallet address");
+        require(bytes(name).length > 0, "Name cannot be empty");
+        require(bytes(_agencies[walletAddress]).length == 0, "Agency already exists");
+        
+        _agencies[walletAddress] = name;
+        _agencyAddresses.push(walletAddress);
+        emit AgencyAdded(walletAddress, name);
     }
 
     // Function to remove an agency address from the Agencies map
     function removeAgency(address walletAddress) public onlyOwner {
-        if(bytes(_agencies[walletAddress]).length != 0) {
-            delete _agencies[walletAddress];
-            for (uint256 i = 0; i < _agencyAddresses.length; i++) {
-                if (_agencyAddresses[i] == walletAddress) {
-                    _agencyAddresses[i] = _agencyAddresses[_agencyAddresses.length - 1];
-                    _agencyAddresses.pop();
-                    break;
-                }
+        require(bytes(_agencies[walletAddress]).length > 0, "Agency does not exist");
+        
+        delete _agencies[walletAddress];
+        for (uint256 i = 0; i < _agencyAddresses.length; i++) {
+            if (_agencyAddresses[i] == walletAddress) {
+                _agencyAddresses[i] = _agencyAddresses[_agencyAddresses.length - 1];
+                _agencyAddresses.pop();
+                break;
             }
         }
+        emit AgencyRemoved(walletAddress);
     }
 
     function listAgencyAddresses() public view onlyOwner returns (address[] memory addresses) {
@@ -288,38 +344,66 @@ contract MediCrypt is Ownable, ERC721Enumerable {
     // Function to list all token IDs accessible only by agencies
     function listAllTokenIds() public view onlyAgency returns (uint256[] memory ids) {
         uint256 totalTokens = totalSupply();
+        require(totalTokens <= MAX_BATCH_SIZE, "Too many tokens, use pagination");
+        
         ids = new uint256[](totalTokens);
-
         for (uint256 i = 0; i < totalTokens; i++) {
             ids[i] = tokenByIndex(i);
         }
-
         return ids;
     }
 
     function listAllTokenNames() public view onlyAgency returns (string[] memory names) {
-    uint256 totalTokens = totalSupply();
-    names = new string[](totalTokens);
-
-    for (uint256 i = 0; i < totalTokens; i++) {
-        uint256 tokenId = tokenByIndex(i);
-        names[i] = _tokenMetadata[tokenId].nftName;
+        uint256 totalTokens = totalSupply();
+        require(totalTokens <= MAX_BATCH_SIZE, "Too many tokens, use pagination");
+        
+        names = new string[](totalTokens);
+        for (uint256 i = 0; i < totalTokens; i++) {
+            uint256 tokenId = tokenByIndex(i);
+            names[i] = _tokenMetadata[tokenId].nftName;
+        }
+        return names;
     }
 
-    return names;
-}
+    // Add pagination functions for large datasets
+    function listTokenIdsPaginated(uint256 offset, uint256 limit) public view onlyAgency returns (uint256[] memory ids, uint256 total) {
+        uint256 totalTokens = totalSupply();
+        require(limit <= MAX_BATCH_SIZE, "Limit too high");
+        require(offset < totalTokens, "Offset out of bounds");
+        
+        uint256 end = offset + limit;
+        if (end > totalTokens) {
+            end = totalTokens;
+        }
+        
+        uint256 length = end - offset;
+        ids = new uint256[](length);
+        
+        for (uint256 i = 0; i < length; i++) {
+            ids[i] = tokenByIndex(offset + i);
+        }
+        
+        return (ids, totalTokens);
+    }
 
     function isAgency(address walletAddress) public view returns (bool) {
         return bytes(_agencies[walletAddress]).length > 0;
     }
     
     modifier onlyTokenOwner(uint256 tokenId) {
+        require(_exists(tokenId), "Token does not exist");
         require(ownerOf(tokenId) == msg.sender, "Caller is not the owner");
         _;
     }
 
     modifier onlyTokenOwnerOrWhitelistedOrAgency(uint256 tokenId) {
-        require(ownerOf(tokenId) == msg.sender || _whitelist[tokenId][msg.sender] || isAgency(msg.sender), "Caller is not the owner or whitelisted or agency");
+        require(_exists(tokenId), "Token does not exist");
+        require(
+            ownerOf(tokenId) == msg.sender || 
+            _whitelist[tokenId][msg.sender] || 
+            isAgency(msg.sender), 
+            "Caller is not the owner or whitelisted or agency"
+        );
         _;
     }
 
