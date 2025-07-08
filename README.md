@@ -8,7 +8,7 @@ MediCrypt is a fullstack project that:
     1. Has a frontend application built with Typescript and ReactTS.
     2. Has a smart contract made with Solidity and deployed with hardhat to the Arbitrum Sepolia test network.
 
-This repository contains the project's smart contract only for the frontend application see: https://github.com/MKarloPilares/MediCrypt
+This repository contains the project's smart contract only. For the frontend application see: https://github.com/MKarloPilares/MediCrypt
 
 Features:
 
