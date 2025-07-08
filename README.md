@@ -31,3 +31,5 @@ To Deploy Contract:
     6. NFT minting to patient wallets
     7. Custom role-based access controls.
     8. Granular record ownership and control.
+
+EDIT: Performed a security audit and addressed several vulnerabilities for learning purposes.
