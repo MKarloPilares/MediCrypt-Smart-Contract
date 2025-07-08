@@ -2,11 +2,25 @@
   "name": "hardhat-project",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "chai": "^4.3.7",
+    "@types/chai": "^4.3.0",
+    "@types/mocha": "^10.0.0",
+    "typescript": "^5.0.0",
+    "solidity-coverage": "^0.8.5",
+    "hardhat-gas-reporter": "^1.0.9",
     "hardhat": "^2.19.4"
   },
   "dependencies": {
     "@openzeppelin/cli": "^2.8.2",
     "@openzeppelin/contracts": "^5.0.2",
     "dotenv": "^16.4.5"
+  },
+  "scripts": {
+    "test": "npx hardhat test",
+    "test:security": "npx hardhat test test/security.test.ts",
+    "test:gas": "npx hardhat test test/gas-optimization.test.ts",
+    "coverage": "npx hardhat coverage",
+    "gas-report": "REPORT_GAS=true npx hardhat test"
   }
 }
