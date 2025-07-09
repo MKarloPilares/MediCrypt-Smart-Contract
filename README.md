@@ -32,4 +32,4 @@ To Deploy Contract:
     7. Custom role-based access controls.
     8. Granular record ownership and control.
 
-EDIT: Performed a security audit and addressed several vulnerabilities for learning purposes.
+This smart contract has been refactored to fit production standards.
