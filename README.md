@@ -32,4 +32,9 @@ To Deploy Contract:
     7. Custom role-based access controls.
     8. Granular record ownership and control.
 
-This smart contract has been refactored to fit production standards and serve as learning material.
+This smart contract has been refactored to show my recent learnings in:
+1. Cleaner, more readable and maintenable code format.
+2. Common smart contract vulnerabilities.
+3. Security auditting.
+4. Hardhat and chai testing.
+5. Gas optimization.
