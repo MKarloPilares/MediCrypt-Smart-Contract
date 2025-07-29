@@ -35,6 +35,5 @@ To Deploy Contract:
 This smart contract has been refactored to show my recent learnings in:
 1. Cleaner, more readable and maintenable code format.
 2. Common smart contract vulnerabilities.
-3. Security auditting.
-4. Hardhat and chai testing.
-5. Gas optimization.
+3. Hardhat and chai testing.
+4. Gas optimization.
